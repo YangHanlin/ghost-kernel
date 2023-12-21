@@ -11,6 +11,12 @@
  * GNU General Public License for more details.
  */
 
+#include <linux/fs.h>
+#include <linux/kernel.h>
+#include <linux/pid_namespace.h>
+#include <linux/printk.h>
+#include <linux/proc_fs.h>
+#include <linux/sched.h>
 #include <linux/syscalls.h>
 #include <linux/mm.h>
 #include <linux/anon_inodes.h>
@@ -8107,6 +8113,8 @@ static ssize_t gf_tasks_write(struct kernfs_open_file *of, char *buf,
 	struct ghost_enclave *old_target;
 	ssize_t ret;
 	long long pid;
+	long pid_ns_inum;
+	char *pid_ns_inum_buf;
 	struct task_struct *t;
 
 	/* See _ghost_setscheduler() for the meaning of sched_priority. */
@@ -8114,16 +8122,61 @@ static ssize_t gf_tasks_write(struct kernfs_open_file *of, char *buf,
 		.sched_priority = -2,
 	};
 
+	for (pid_ns_inum_buf = buf;
+	     pid_ns_inum_buf < buf + len && *pid_ns_inum_buf;
+	     ++pid_ns_inum_buf) {
+		if (*pid_ns_inum_buf == ' ') {
+			*pid_ns_inum_buf++ = '\0';
+			break;
+		}
+	}
+
 	ret = kstrtoll(buf, 0, &pid);
-	if (ret)
+	if (ret) {
+		pr_debug("ghost: pid '%s' is not a number (%ld)\n", buf, ret);
 		return ret;
+	} else {
+		pr_debug("ghost: successfully parsed pid '%s' as %lld\n", buf,
+			 pid);
+	}
+
+	ret = kstrtol(pid_ns_inum_buf, 0, &pid_ns_inum);
+	if (ret) {
+		pr_debug("ghost: pid_ns_inum '%s' is not a number (%ld)\n",
+			 pid_ns_inum_buf, ret);
+		pid_ns_inum = 0;
+	} else {
+		pr_debug("ghost: successfully parsed pid_ns_inum '%s' as %ld\n",
+			 pid_ns_inum_buf, pid_ns_inum);
+	}
 
 	if (pid) {
 		rcu_read_lock();
-		if (gtid_seqnum(pid))
+		if (gtid_seqnum(pid)) {
+			if (pid_ns_inum != 0) {
+				pr_debug(
+					"ghost: pid_ns_inum %ld ignored for gtid %lld\n",
+					pid_ns_inum, pid);
+			}
 			t = find_task_by_gtid(pid); /* pid is actually a gtid */
-		else
-			t = find_task_by_vpid(pid);
+		} else {
+			if (pid_ns_inum == 0) {
+				pr_debug(
+					"ghost: getting process from pid %lld and current namespace\n",
+					pid);
+				t = find_task_by_vpid(pid);
+			} else if (pid_ns_inum == -1) {
+				pr_debug(
+					"ghost: getting process from pid %lld and root namespace\n",
+					pid);
+				t = find_task_by_pid_ns(pid, &init_pid_ns);
+			} else {
+				pr_debug(
+					"ghost: getting process from pid %lld and namespace %ld (currently not supported)\n",
+					pid, pid_ns_inum);
+				t = NULL;
+			}
+		}
 		if (!t) {
 			rcu_read_unlock();
 			return -ESRCH;
