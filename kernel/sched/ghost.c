@@ -8101,6 +8101,9 @@ static int gf_tasks_show(struct seq_file *sf, void *v)
 	return 0;
 }
 
+#define USE_CURRENT_PID_NS 0
+#define USE_ROOT_PID_NS -1
+
 /*
  * This file is world writable so that any task can join an enclave.  However,
  * you must have CAP_SYS_NICE to change the scheduling policy of another thread.
@@ -8144,7 +8147,7 @@ static ssize_t gf_tasks_write(struct kernfs_open_file *of, char *buf,
 	if (ret) {
 		pr_debug("ghost: pid_ns_inum '%s' is not a number (%ld)\n",
 			 pid_ns_inum_buf, ret);
-		pid_ns_inum = 0;
+		pid_ns_inum = USE_CURRENT_PID_NS;
 	} else {
 		pr_debug("ghost: successfully parsed pid_ns_inum '%s' as %ld\n",
 			 pid_ns_inum_buf, pid_ns_inum);
@@ -8160,12 +8163,12 @@ static ssize_t gf_tasks_write(struct kernfs_open_file *of, char *buf,
 			}
 			t = find_task_by_gtid(pid); /* pid is actually a gtid */
 		} else {
-			if (pid_ns_inum == 0) {
+			if (pid_ns_inum == USE_CURRENT_PID_NS) {
 				pr_debug(
 					"ghost: getting process from pid %lld and current namespace\n",
 					pid);
 				t = find_task_by_vpid(pid);
-			} else if (pid_ns_inum == -1) {
+			} else if (pid_ns_inum == USE_ROOT_PID_NS) {
 				pr_debug(
 					"ghost: getting process from pid %lld and root namespace\n",
 					pid);
